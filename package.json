@@ -1,0 +1,23 @@
+{
+  "dependencies": {
+    "@credo-ts/openid4vc": "^0.5.9",
+    "@sd-jwt/crypto-nodejs": "^0.7.2",
+    "@sd-jwt/sd-jwt-vc": "^0.7.2",
+    "axios": "^1.7.2",
+    "cloudevents-sdk": "^2.0.4",
+    "crypto": "^1.0.1",
+    "express": "^4.19.2",
+    "jose": "^5.6.3",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "scripts": {
+    "build": "babel src --out-dir dist",
+    "start": "node dist/server.js"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.25.6",
+    "@babel/core": "^7.25.2",
+    "@babel/preset-env": "^7.25.4"
+  }
+}
