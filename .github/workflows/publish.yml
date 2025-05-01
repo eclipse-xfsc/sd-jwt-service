@@ -12,7 +12,7 @@ jobs:
     with: 
       dockerfile: "deployment/docker/Dockerfile"
       harbor_config: "deployment/harbor.config"
-      repo_name: well-known-service
+      repo_name: sd-jwt-service
   helm:
     uses: eclipse-xfsc/dev-ops/.github/workflows/helm.yml@main
     secrets: inherit
