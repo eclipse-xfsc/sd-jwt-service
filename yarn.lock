@@ -1506,10 +1506,10 @@
     "@sd-jwt/types" "0.7.2"
     "@sd-jwt/utils" "0.7.2"
 
-"@sd-jwt/crypto-nodejs@^0.7.2":
-  version "0.7.2"
-  resolved "https://registry.yarnpkg.com/@sd-jwt/crypto-nodejs/-/crypto-nodejs-0.7.2.tgz#4138447bc7dd7a8166ee0473d994f70bcdc17833"
-  integrity sha512-7DHy1WBHwvXseiX+U7XA6jX4dX4Ins3Nxd12JhBSm+FJfIwU97FU/H0KlF6lLyi4a4nbY/O6U9wJjYI1PxA9sQ==
+"@sd-jwt/crypto-nodejs@^0.12.0":
+  version "0.12.0"
+  resolved "https://registry.yarnpkg.com/@sd-jwt/crypto-nodejs/-/crypto-nodejs-0.12.0.tgz#acbd900e361553ea96cf36ce61d3a6670029fee7"
+  integrity sha512-zaMUTSmHPfZmSzvM2vdX5/cAxNc7nSTmRYqvcVRXFIZlzawAqq9vMkuCw+tw6C3lZRYemMm2/YFn10+N7A5lmg==
 
 "@sd-jwt/decode@0.6.1", "@sd-jwt/decode@^0.6.1":
   version "0.6.1"
