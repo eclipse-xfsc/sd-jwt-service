@@ -1,7 +1,7 @@
 {
   "dependencies": {
     "@credo-ts/openid4vc": "^0.5.9",
-    "@sd-jwt/crypto-nodejs": "^0.7.2",
+    "@sd-jwt/crypto-nodejs": "^0.13.0",
     "@sd-jwt/sd-jwt-vc": "^0.7.2",
     "axios": "^1.7.2",
     "cloudevents-sdk": "^2.0.4",
