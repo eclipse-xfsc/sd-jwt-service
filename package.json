@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "@credo-ts/openid4vc": "^0.5.9",
+    "@credo-ts/openid4vc": "^0.5.16",
     "@sd-jwt/crypto-nodejs": "^0.15.0",
     "@sd-jwt/sd-jwt-vc": "^0.15.0",
     "axios": "^1.7.2",
