@@ -16,7 +16,7 @@
     "start": "node dist/server.js"
   },
   "devDependencies": {
-    "@babel/cli": "^7.25.6",
+    "@babel/cli": "^7.28.3",
     "@babel/core": "^7.25.2",
     "@babel/preset-env": "^7.28.3"
   }
