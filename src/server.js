@@ -371,7 +371,7 @@ app.post('/issue', async (req, res) => {
         signer,
         signAlg: issuer.signer.alg,
         hasher: digest,
-        hashAlg: 'SHA-256',
+        hashAlg: 'sha-256',
         saltGenerator: generateSalt,
       });
 
@@ -480,7 +480,7 @@ app.post('/verify', async (req, res) => {
   const sdjwtInstance = new SDJwtVcInstance({
     verifier,
     hasher: digest,
-    hashAlg: 'SHA-256',
+    hashAlg: 'sha-256',
     saltGenerator: generateSalt,
     kbVerifier: kbVerifier,
     statusListFetcher: async (uri) => {
@@ -576,7 +576,7 @@ app.post("/present",async(req,res) => {
           kbSigner: kbsigner,
           kbSignAlg: holder.signer.alg,
           hasher: digest,
-          hashAlg: 'SHA-256',
+          hashAlg: 'sha-256',
           saltGenerator: generateSalt
         });
       
