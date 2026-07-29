@@ -31,10 +31,12 @@ spec:
         image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ default .Chart.AppVersion .Values.image.tag }}"
         imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
         env:
+        {{- if eq (index .Values.podAnnotations "inject.xfsc.io/enabled") "false" }}
           - name: SIGNER_SIGN_URL
             value: "{{ .Values.config.signUrl }}"
           - name: RESOLVER_URL
             value: "{{ .Values.config.resolverUrl }}"
+        {{- end }}
           - name: PORT
             value: "{{ .Values.service.port }}"
         ports:
