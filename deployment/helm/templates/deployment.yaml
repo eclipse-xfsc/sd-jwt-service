@@ -1,10 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ template "app.name" . }}
-  namespace: "{{ .Release.Namespace }}"
+  name: {{ include "app.name" . }}
+  namespace: {{ .Release.Namespace | quote }}
   labels:
-    app: {{- include "app.labels" . | nindent 4 }}
+    {{- include "app.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   strategy:
@@ -14,40 +14,38 @@ spec:
       maxUnavailable: 0
   selector:
     matchLabels:
-      app: 
-         {{- include "app.selectorLabels" . | nindent 6}}
+      {{- include "app.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app: 
-          {{- include "app.labels" . | nindent 8 }}
-      {{- if .Values.podAnnotations }}
+        {{- include "app.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
       annotations:
-        {{ toYaml .Values.podAnnotations | indent 8 }}
+        {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
       containers:
-      - name: {{ template "app.name" . }}
-        image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ default .Chart.AppVersion .Values.image.tag }}"
-        imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
-        env:
-        {{- if eq (index .Values.podAnnotations "inject.xfsc.io/enabled") "false" }}
-          - name: SIGNER_SIGN_URL
-            value: "{{ .Values.config.signUrl }}"
-          - name: RESOLVER_URL
-            value: "{{ .Values.config.resolverUrl }}"
-        {{- end }}
-          - name: PORT
-            value: "{{ .Values.service.port }}"
-        ports:
-        - name: http
-          containerPort: {{ .Values.service.port }}
-        readinessProbe:
-          httpGet:
-            path: /isAlive
-            port: {{ .Values.service.port }}
-          initialDelaySeconds: 5
-          periodSeconds: 5
-          successThreshold: 2
-          failureThreshold: 2
-          timeoutSeconds: 5
+        - name: {{ include "app.name" . }}
+          image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ default .Chart.AppVersion .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
+          env:
+            {{- if eq (default "" (index .Values.podAnnotations "inject.xfsc.io/enabled")) "false" }}
+            - name: SIGNER_SIGN_URL
+              value: {{ .Values.config.signUrl | quote }}
+            - name: RESOLVER_URL
+              value: {{ .Values.config.resolverUrl | quote }}
+            {{- end }}
+            - name: PORT
+              value: {{ .Values.service.port | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+          readinessProbe:
+            httpGet:
+              path: /isAlive
+              port: {{ .Values.service.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            successThreshold: 2
+            failureThreshold: 2
+            timeoutSeconds: 5

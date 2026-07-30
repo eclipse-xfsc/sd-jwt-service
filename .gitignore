@@ -2,3 +2,4 @@ node_modules
 dist
 deployment/helm/charts
 deployment/helm/requirements.lock
+Chart.lock
