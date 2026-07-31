@@ -1,3 +1,6 @@
+{{- $podAnnotations := .Values.podAnnotations | default dict }}
+{{- $injectEnabled := get $podAnnotations "inject.xfsc.io/enabled" | default "" | toString }}
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -5,6 +8,7 @@ metadata:
   namespace: {{ .Release.Namespace | quote }}
   labels:
     {{- include "app.labels" . | nindent 4 }}
+
 spec:
   replicas: {{ .Values.replicaCount }}
   strategy:
@@ -12,9 +16,11 @@ spec:
     rollingUpdate:
       maxSurge: 1
       maxUnavailable: 0
+
   selector:
     matchLabels:
       {{- include "app.selectorLabels" . | nindent 6 }}
+
   template:
     metadata:
       labels:
@@ -23,27 +29,31 @@ spec:
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+
     spec:
       containers:
         - name: {{ include "app.name" . }}
           image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ default .Chart.AppVersion .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
+
           env:
-            {{- if eq (default "" (index .Values.podAnnotations "inject.xfsc.io/enabled")) "false" }}
+{{- if eq $injectEnabled "false" }}
             - name: SIGNER_SIGN_URL
               value: {{ .Values.config.signUrl | quote }}
             - name: RESOLVER_URL
               value: {{ .Values.config.resolverUrl | quote }}
-            {{- end }}
+{{- end }}
             - name: PORT
-              value: {{ .Values.service.port | quote }}
+              value: {{ .Values.service.port | toString | quote }}
+
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
+
           readinessProbe:
             httpGet:
               path: /isAlive
-              port: {{ .Values.service.port }}
+              port: http
             initialDelaySeconds: 5
             periodSeconds: 5
             successThreshold: 2
