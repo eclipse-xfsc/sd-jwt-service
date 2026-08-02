@@ -1,5 +1,8 @@
 {{- $podAnnotations := .Values.podAnnotations | default dict }}
-{{- $injectEnabled := get $podAnnotations "inject.xfsc.io/enabled" | default "" | toString }}
+{{- $injectEnabled := "" }}
+{{- if hasKey $podAnnotations "inject.xfsc.io/enabled" }}
+  {{- $injectEnabled = printf "%v" (get $podAnnotations "inject.xfsc.io/enabled") | lower | trim }}
+{{- end }}
 
 apiVersion: apps/v1
 kind: Deployment
@@ -37,12 +40,12 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
 
           env:
-{{- if eq $injectEnabled "false" }}
+            {{- if eq $injectEnabled "false" }}
             - name: SIGNER_SIGN_URL
-              value: {{ .Values.config.signUrl | quote }}
+              value: {{ required "config.signUrl is required when injection is disabled" .Values.config.signUrl | quote }}
             - name: RESOLVER_URL
-              value: {{ .Values.config.resolverUrl | quote }}
-{{- end }}
+              value: {{ required "config.resolverUrl is required when injection is disabled" .Values.config.resolverUrl | quote }}
+            {{- end }}
             - name: PORT
               value: {{ .Values.service.port | toString | quote }}
 
