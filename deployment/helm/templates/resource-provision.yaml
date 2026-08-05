@@ -1,0 +1,20 @@
+{{- if eq (index .Values.podAnnotations "inject.xfsc.io/enabled") "true" }}
+{{- $serviceName := include "app.name" . -}}
+{{- $serviceURL := printf "http://%s.%s.svc.cluster.local" $serviceName .Release.Namespace -}}
+apiVersion: resources.xfsc.io/v1alpha1
+kind: ResourceProvider
+metadata:
+  name: sdjwt
+spec:
+  type: sdjwt
+  scope: {{ .Values.resourceProvider.scope | quote }}
+  description: {{ .Values.resourceProvider.description | quote }}
+{{- with .Values.resourceProvider.allow.namespaces }}
+  allow:
+    namespaces:
+{{ toYaml . | indent 6 }}
+{{- end }}
+  outputs:
+    env:
+      SDJWT_SERVICE_URL: {{ $serviceURL | quote }}    
+{{- end }}

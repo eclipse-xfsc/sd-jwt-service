@@ -19,6 +19,14 @@ podAnnotations:
     inject.xfsc.io/enabled: "false"
     inject.xfsc.io/needs: "signer,did-resolver"
 
+resourceProvider:
+  enabled: true
+  name: ""
+  scope: Cluster
+  description: SDJwt Service
+  allow:
+    namespaces: []
+
 resources:
   requests:
     cpu: 25m
