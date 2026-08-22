@@ -1,6 +1,6 @@
 {{- if eq (index .Values.podAnnotations "inject.xfsc.io/enabled") "true" }}
 {{- $serviceName := include "app.name" . -}}
-{{- $serviceURL := printf "http://%s.%s.svc.cluster.local" $serviceName .Release.Namespace -}}
+{{- $serviceURL := printf "http://%s.%s.svc.cluster.local:%s" $serviceName .Release.Namespace .Values.service.port -}}
 apiVersion: resources.xfsc.io/v1alpha1
 kind: ResourceProvider
 metadata:
