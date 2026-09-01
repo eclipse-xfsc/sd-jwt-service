@@ -14,7 +14,7 @@ COPY . .
 
 RUN yarn build
 
-FROM node:20.11-slim AS final
+FROM node:20.19-slim AS final
 
 ARG NODE_ENV=production
 ENV NODE_ENV=${NODE_ENV}
