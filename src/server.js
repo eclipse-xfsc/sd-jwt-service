@@ -287,7 +287,6 @@ const createVerifier = () => {
 };
 
 const signerFunc = async (keyMetadata,data) => {
-      
   return await axios.post(process.env.SIGNER_SIGN_URL,{
      "namespace": keyMetadata.namespace,
      "group": keyMetadata.group,
@@ -359,7 +358,7 @@ app.post('/issue', async (req, res) => {
 
       const header = {
         alg: issuer.signer.alg,
-        typ: 'sd-jwt',
+        typ: 'dc+sd-jwt',
         kid: issuer.signer.kid,
       }
 
