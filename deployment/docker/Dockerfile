@@ -1,4 +1,4 @@
-FROM node:20.11 AS build-service
+FROM node:20.19 AS build-service
 ARG APP_HOME=/home/node/app
 ARG SERVICE
 
