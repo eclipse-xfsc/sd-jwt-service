@@ -16,7 +16,7 @@
             },
             "osx": {
                 "program": "${workspaceFolder}/src/server.js",
-                "runtimeExecutable": "/Users/Arbeit/.nvm/versions/node/v20.17.0/bin/node"
+                "runtimeExecutable": "node"
             },
             "linux": {
                 "program": "${workspaceFolder}/src/server.js",

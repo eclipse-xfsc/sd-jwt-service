@@ -572,7 +572,8 @@ app.post('/verify', async (req, res) => {
     saltGenerator: generateSalt,
     kbVerifier: kbVerifier,
     statusListFetcher: async (uri) => {
-      return await axios.get(uri)
+       const response = await axios.get(uri);
+       return response.data;
     },
   });
 
