@@ -228,61 +228,150 @@ async function fetchDIDDocument(did) {
 const createVerifier = () => {
   const verifier = async (data, sig) => {
     try {
-      console.debug("Data:"+data+" Sig:" +  sig)
+      console.debug("Data:" + data + " Sig:" + sig);
 
       const parts = data.split('.');
-      const decodedParts = parts.map(part => Buffer.from(part,'base64url').toString('utf-8'));
+      const decodedParts = parts.map(part =>
+        Buffer.from(part, 'base64url').toString('utf-8')
+      );
 
-      if (decodedParts != null) {
-        const header = JSON.parse(decodedParts[0])
-        const body = JSON.parse(decodedParts[1])
-    
-        var jwk = null
+      if (!decodedParts || decodedParts.length < 2) {
+        throw new Error("token not parseable");
+      }
 
-        if (!header) {
-          throw new Error("header not parseable:" + decodedParts[0])
-        }
+      const header = JSON.parse(decodedParts[0]);
+      const body = JSON.parse(decodedParts[1]);
 
-        if (header.jwk) {
-          jwk = header.jwk
-        } else {
-          if (header.kid) {
-            const resolverResult =await fetchDIDDocument(header.kid)
-  
-            const parts = header.kid.split('#');
+      if (!header) {
+        throw new Error("header not parseable: " + decodedParts[0]);
+      }
 
-            var key = resolverResult.verificationMethod.find(obj => obj.id == header.kid)  
+      let jwk = null;
 
-            if (!key) {
-                key = resolverResult.verificationMethod.find(obj => obj.id == "#"+parts[1])  
-            }
+      // JWK direkt im Header hat Vorrang
+      if (header.jwk) {
+        jwk = header.jwk;
+      } else if (header.kid) {
+        let did;
+        let keyId;
 
+        if (header.kid.startsWith('did:')) {
+          /*
+           * Beispiel:
+           * kid = did:example:123#key-1
+           *
+           * DID-Dokument:
+           * did:example:123
+           *
+           * Gesuchter Key:
+           * did:example:123#key-1
+           */
+          const hashIndex = header.kid.indexOf('#');
 
-            jwk = key.publicKeyJwk
+          did = hashIndex >= 0
+            ? header.kid.substring(0, hashIndex)
+            : header.kid;
+
+          keyId = header.kid;
+
+        } else if (header.kid.startsWith('#')) {
+          /*
+           * Beispiel:
+           * kid = #key-1
+           * iss = did:example:123
+           *
+           * DID-Dokument:
+           * did:example:123
+           *
+           * Gesuchter Key:
+           * did:example:123#key-1
+           */
+          if (!body.iss || typeof body.iss !== 'string') {
+            throw new Error(
+              "kid starts with # but iss claim is missing"
+            );
           }
+
+          if (!body.iss.startsWith('did:')) {
+            throw new Error(
+              "kid starts with # but iss is not a DID: " + body.iss
+            );
+          }
+
+          did = body.iss;
+          keyId = body.iss + header.kid;
+
+        } else {
+          throw new Error(
+            "unsupported kid format: " + header.kid
+          );
         }
 
-        if (jwk == null) {
-         throw new Error("no public key for verification found")
+        const resolverResult = await fetchDIDDocument(did);
+
+        if (
+          !resolverResult ||
+          !Array.isArray(resolverResult.verificationMethod)
+        ) {
+          throw new Error(
+            "DID document contains no verificationMethod"
+          );
         }
 
-        console.log(jwk)
-        
-        return crypto.verify(null, Buffer.from(data), {
+        // Unterstützt sowohl absolute IDs:
+        // did:example:123#key-1
+        //
+        // als auch relative IDs:
+        // #key-1
+        const fragmentIndex = keyId.indexOf('#');
+        const fragment =
+          fragmentIndex >= 0
+            ? keyId.substring(fragmentIndex)
+            : null;
+
+        const key = resolverResult.verificationMethod.find(method =>
+          method.id === keyId ||
+          (fragment && method.id === fragment)
+        );
+
+        if (!key) {
+          throw new Error(
+            "verification key not found in DID document: " + keyId
+          );
+        }
+
+        if (!key.publicKeyJwk) {
+          throw new Error(
+            "verification method has no publicKeyJwk: " + key.id
+          );
+        }
+
+        jwk = key.publicKeyJwk;
+      }
+
+      if (jwk == null) {
+        throw new Error("no public key for verification found");
+      }
+
+      console.debug("Verification JWK:", jwk);
+
+      return crypto.verify(
+        null,
+        Buffer.from(data),
+        {
           key: jwk,
           format: 'jwk',
-          dsaEncoding:'ieee-p1363'
-        }, Buffer.from(sig, 'base64url'));
+          dsaEncoding: 'ieee-p1363'
+        },
+        Buffer.from(sig, 'base64url')
+      );
 
-      } else {
-        console.error('kid missing in token');
-        throw error;
-      }
     } catch (error) {
-      console.log(error)
-      return false
+      console.error("Verification failed:", error);
+      return false;
     }
   };
+
   return { verifier };
 };
 
