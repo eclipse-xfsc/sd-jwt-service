@@ -1,8 +1,9 @@
 FROM node:20.19 AS build-service
+
 ARG APP_HOME=/home/node/app
 ARG SERVICE
 
-WORKDIR /home/node/app
+WORKDIR ${APP_HOME}
 
 RUN corepack enable
 
@@ -14,30 +15,39 @@ COPY . .
 
 RUN yarn build
 
+
 FROM node:20.19-slim AS final
 
 ARG NODE_ENV=production
 ENV NODE_ENV=${NODE_ENV}
 
 WORKDIR /home/node/app
-CMD ["node", "dist/server.js"]
+
+# Install/update current system CA certificates
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build-service --chown=node:node /home/node/app/dist ./dist
 COPY --from=build-service --chown=node:node /home/node/app/node_modules ./node_modules
 COPY --from=build-service --chown=node:node /home/node/app/package.json .
 
-# Cut unnecessary stuff from package.json. Only leave name, version, description and module type
+# Cut unnecessary stuff from package.json.
+# Only leave name, version, description and module type.
 RUN node -e "\
-  const { name, description, version, type } = JSON.parse(fs.readFileSync('./package.json', 'utf-8'));\
-  fs.writeFileSync('./package.json', JSON.stringify({ name, version, description, type }, null, 2));\
+  const fs = require('fs'); \
+  const { name, description, version, type } = JSON.parse(fs.readFileSync('./package.json', 'utf-8')); \
+  fs.writeFileSync('./package.json', JSON.stringify({ name, version, description, type }, null, 2)); \
 "
 
-ENV PORT 3000
+ENV PORT=3000
 
-ENV RESOLVER_URL CHANGE
-ENV SIGNER_SIGN_URL CHANGE
+ENV RESOLVER_URL=CHANGE
+ENV SIGNER_SIGN_URL=CHANGE
 
 EXPOSE 3000
 
 USER node
 
+CMD ["node", "dist/server.js"]
