@@ -572,8 +572,13 @@ app.post('/verify', async (req, res) => {
     saltGenerator: generateSalt,
     kbVerifier: kbVerifier,
     statusListFetcher: async (uri) => {
-       const response = await axios.get(uri);
-       return response.data;
+    const response = await axios.get(uri, {
+      headers: {
+        Accept: 'application/statuslist+jwt'
+        }
+      });
+
+      return response.data;
     },
   });
 
