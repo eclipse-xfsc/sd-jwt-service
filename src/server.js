@@ -212,7 +212,7 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 async function fetchDIDDocument(did) {
   try {
-    const response = await axios.get(process.env.RESOLVER_URL+did);
+    const response = await axios.get(process.env.DID_RESOLVER+"/1.0/identifiers/"+did);
     
      if (response.data && response.data.didDocument) {
       return response.data.didDocument;

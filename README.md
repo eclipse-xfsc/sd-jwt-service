@@ -20,7 +20,7 @@ Start service.
 node server.js --env-file=.env
 ``` 
 
-Ensure to set SIGNER_SIGN_URL and RESOLVER_URL to the tsa signer service and the resolver url.
+Ensure to set SIGNER_SIGN_URL and DID_RESOLVER to the tsa signer service and the resolver url.
 
 # Open API
 

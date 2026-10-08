@@ -43,7 +43,7 @@ spec:
             {{- if eq $injectEnabled "false" }}
             - name: SIGNER_SIGN_URL
               value: {{ required "config.signUrl is required when injection is disabled" .Values.config.signUrl | quote }}
-            - name: RESOLVER_URL
+            - name: DID_RESOLVER
               value: {{ required "config.resolverUrl is required when injection is disabled" .Values.config.resolverUrl | quote }}
             {{- end }}
             - name: PORT
