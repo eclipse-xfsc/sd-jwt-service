@@ -1,401 +1,233 @@
+// Reconstructed from the server.js pasted in the conversation.
 const express = require('express');
 const { digest, generateSalt } = require('@sd-jwt/crypto-nodejs');
-const { decodeSdJwt, getClaims } = require( '@sd-jwt/decode');
+const { decodeSdJwt, getClaims } = require('@sd-jwt/decode');
 const crypto = require('crypto');
 const axios = require('axios');
-const { SDJwtVcInstance } = require('@sd-jwt/sd-jwt-vc'); // aktualisieren mit dem richtigen Pfad
-const base64url = require('base64url');
+const { SDJwtVcInstance } = require('@sd-jwt/sd-jwt-vc');
 const swaggerJsdoc = require('swagger-jsdoc');
 const swaggerUi = require('swagger-ui-express');
 
-
-const swaggerOptions = {
-  definition: {
-    openapi: '3.0.0',
-    info: {
-      title: 'SD-JWT Service',
-      version: '1.0.0',
-      description: 'This is a service to generate and verify SD-JWT',
-    },
-  },
-  apis: ['./server.js'], // Pfad zur API-Dokumentation
-};
-
-const swaggerSpec = swaggerJsdoc(swaggerOptions);
 const app = express();
-const port = process.env.PORT;
+app.use(express.json({ limit: '1mb' }));
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerJsdoc({
+  definition: { openapi: '3.0.0', info: { title: 'SD-JWT Service', version: '1.0.0' } },
+  apis: ['./server.js']
+})));
 
-app.use(express.json());
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+async function fetchDIDDocument(did) {
+  const response = await axios.get(`${process.env.DID_RESOLVER}/1.0/identifiers/${encodeURIComponent(did)}`);
+  return response.data?.didDocument ?? response.data;
+}
+
+function createVerifier() {
+  return { verifier: async (data, sig) => {
+    try {
+      const [encodedHeader, encodedPayload] = data.split('.');
+      if (!encodedHeader || !encodedPayload) throw new Error('Invalid JWT signing input');
+      const header = JSON.parse(Buffer.from(encodedHeader, 'base64url').toString('utf8'));
+      const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
+      let jwk = header.jwk;
+      if (!jwk && header.kid) {
+        const kid = header.kid;
+        const did = kid.startsWith('did:') ? kid.split('#')[0] : kid.startsWith('#') ? payload.iss : null;
+        if (!did || !did.startsWith('did:')) throw new Error('Unsupported kid');
+        const document = await fetchDIDDocument(did);
+        const fullKid = kid.startsWith('#') ? did + kid : kid;
+        const fragment = fullKid.includes('#') ? fullKid.slice(fullKid.indexOf('#')) : null;
+        const method = document.verificationMethod?.find(m => m.id === fullKid || (fragment && m.id === fragment));
+        if (!method?.publicKeyJwk) throw new Error(`Verification method not found: ${fullKid}`);
+        jwk = method.publicKeyJwk;
+      }
+      if (!jwk) throw new Error('Missing verification key');
+      return crypto.verify(null, Buffer.from(data), {
+        key: jwk, format: 'jwk', dsaEncoding: 'ieee-p1363'
+      }, Buffer.from(sig, 'base64url'));
+    } catch (error) {
+      console.error('Issuer signature verification failed:', error);
+      return false;
+    }
+  }};
+}
+
+async function signerFunc(keyMetadata, data) {
+  try {
+    const response = await axios.post(process.env.SIGNER_SIGN_URL, {
+      namespace: keyMetadata.namespace, group: keyMetadata.group,
+      key: keyMetadata.key, data: Buffer.from(data).toString('base64')
+    }, { headers: { 'Content-Type': 'application/json' } });
+    if (typeof response.data?.signature !== 'string') throw new Error('Missing signer signature');
+    return Buffer.from(response.data.signature, 'base64').toString('base64url');
+  } catch (error) {
+    console.error('Signing failed:', error.response?.data ?? error.message);
+    throw error;
+  }
+}
+
+function normalizePresentationFrame(frame) {
+  if (frame === undefined || frame === null) return {};
+  if (Array.isArray(frame)) {
+    const result = Object.create(null);
+    for (const claim of frame) {
+      if (typeof claim !== 'string' || !claim.trim() || ['__proto__', 'constructor', 'prototype'].includes(claim)) {
+        throw new Error('Invalid disclosure claim');
+      }
+      result[claim] = true;
+    }
+    return result;
+  }
+  if (typeof frame !== 'object') throw new Error('presentationFrame must be an object or string array');
+  return frame;
+}
 
 /**
  * @swagger
  * components:
  *   schemas:
  *     SignerDetails:
- *        type: object
- *        properties:         
- *          kid:
- *            type: string
- *            example: did:web:xxxxx
- *            required: true
- *          alg:
- *            type: string
- *            example: ES256
- *            required: true
- *          namespace:
- *            type: string
- *            description: namespace of signer
- *            example: space
- *            required: true
- *          key: 
- *            type: string
- *            description: key of signer
- *            example: space
- *            required: true
- *          group: 
- *            type: string
- *            description: key of signer
- *            example: space
- *            required: true
+ *       type: object
+ *       properties:
+ *         kid:
+ *           type: string
+ *           example: did:web:xxxxx
+ *         alg:
+ *           type: string
+ *           example: ES256
+ *         namespace:
+ *           type: string
+ *           example: space
+ *         key:
+ *           type: string
+ *           example: space
+ *         group:
+ *           type: string
+ *           example: space
  *     HolderDetails:
- *        type: object
- *        properties:
- *          cnf:
- *            type: object
- *            description: Public JWK of the Holder
- *            required: false
- *          signer:
- *            allOf:
- *              - $ref: '#/components/schemas/SignerDetails'
+ *       type: object
+ *       properties:
+ *         cnf:
+ *           type: object
+ *           description: Public JWK of the Holder
+ *         signer:
+ *           $ref: '#/components/schemas/SignerDetails'
  *     PresentationBody:
- *        type: object
- *        properties:
- *          sdjwt:
- *            type: string
- *            example: eyJ0....
- *            required: true
- *          presentationFrame: 
- *            type: object
- *            example: {"email":true}
- *            required: true  
- *          holder:
- *             required: true
- *             allOf:
- *              - $ref: '#/components/schemas/HolderDetails' 
- *          nonce:
- *            required: true
- *            type: string 
- *          aud:
- *            required: true
- *            type: string 
+ *       type: object
+ *       required: [sdjwt, holder, nonce, aud]
+ *       properties:
+ *         sdjwt:
+ *           type: string
+ *           example: eyJ0....
+ *         presentationFrame:
+ *           type: object
+ *           description: Map of claim names to booleans, e.g. {test: true}
+ *           additionalProperties:
+ *             type: boolean
+ *           example: {email: true}
+ *         disclosureFrame:
+ *           type: array
+ *           description: Legacy alternative to presentationFrame
+ *           items:
+ *             type: string
+ *           example: [email]
+ *         holder:
+ *           $ref: '#/components/schemas/HolderDetails'
+ *         nonce:
+ *           type: string
+ *         aud:
+ *           type: string
  *     SubjectDetails:
- *        type: object
- *        properties:
- *          claims:
- *            type: object
- *            description: Json with claims
- *            required: false
- *          iss:
- *            type: string
- *            required: true
- *          iat: 
- *            type: string
- *            required: true
- *          exp: 
- *            type: string
- *            required: true
+ *       type: object
+ *       properties:
+ *         claims:
+ *           type: object
+ *           description: JSON with claims
+ *         iss:
+ *           type: string
+ *         iat:
+ *           type: integer
+ *         exp:
+ *           type: integer
  *     IssuerDetails:
- *        type: object
- *        properties:    
- *          signer:
- *            allOf:
- *              - $ref: '#/components/schemas/SignerDetails' 
+ *       type: object
+ *       properties:
+ *         signer:
+ *           $ref: '#/components/schemas/SignerDetails'
  *     DisclosureDetails:
- *        type: object
- *        properties:
- *          _sd:
- *            type: array
- *            example: ["email"]
- *            items:
- *               type: string
- *            required: false  
+ *       type: object
+ *       properties:
+ *         _sd:
+ *           type: array
+ *           example: [email]
+ *           items:
+ *             type: string
  *     IssueBody:
- *        type: object
- *        properties:
- *          vct:
- *            type: string
- *            example: eyJ0....
- *            required: true
- *          disclosureFrame:
- *            allOf:
- *              - $ref: '#/components/schemas/DisclosureDetails'  
- *          holder:
- *            allOf:
- *              - $ref: '#/components/schemas/HolderDetails'    
- *          subject:
- *            allOf:
- *              - $ref: '#/components/schemas/SubjectDetails'  
- *          issuer:
- *            allOf:
- *              - $ref: '#/components/schemas/IssuerDetails' 
+ *       type: object
+ *       properties:
+ *         vct:
+ *           type: string
+ *           example: https://example.org/credential-type
+ *         disclosureFrame:
+ *           $ref: '#/components/schemas/DisclosureDetails'
+ *         holder:
+ *           $ref: '#/components/schemas/HolderDetails'
+ *         subject:
+ *           $ref: '#/components/schemas/SubjectDetails'
+ *         issuer:
+ *           $ref: '#/components/schemas/IssuerDetails'
  *     IssueResponse:
- *        type: object
- *        properties:
- *          sdjwt:
-  *           type: string
-  *           example: eyx....
-  *           required: true
+ *       type: object
+ *       properties:
+ *         sdjwt:
+ *           type: string
+ *           example: eyJ0....
  *     VerifyBody:
- *        type: object 
- *        properties:  
- *          sdjwt:
- *            type: string
- *            example: eyJ0....
- *            required: true
- *          verifyKeyBinding:
- *            type: boolean
- *            example: false
- *            required: false
- *          disclosureFrame:
- *            type: array
- *            example: ["email","name"] 
- *            required: false
- *          aud: 
- *            type: string
- *            example: did:web:example
- *            required: false
- *          nonce: 
- *            type: string
- *            example: 223323
- *            required: false
+ *       type: object
+ *       properties:
+ *         sdjwt:
+ *           type: string
+ *         verifyKeyBinding:
+ *           type: boolean
+ *           example: false
+ *         disclosureFrame:
+ *           type: array
+ *           items:
+ *             type: string
+ *           example: [email, name]
+ *         aud:
+ *           type: string
+ *         nonce:
+ *           type: string
  *     Error:
  *       type: object
- *       properties: 
- *          error: 
- *            type: string
- *            example: Invalid JWT
+ *       properties:
+ *         error:
+ *           type: string
+ *           example: Invalid JWT
  *     VerifyResult:
  *       type: object
- *       properties:  
+ *       properties:
  *         isValid:
  *           type: boolean
- *           example: false
  *         isValidJwtPayload:
  *           type: boolean
- *           example: false
  *         isSignatureValid:
  *           type: boolean
- *           example: false
  *         isStatusValid:
  *           type: boolean
- *           example: false
  *         areRequiredClaimsIncluded:
  *           type: boolean
- *           example: false
  *         isKeyBindingValid:
  *           type: boolean
- *           example: false
  *         containsExpectedKeyBinding:
  *           type: boolean
- *           example: false
  *     VerifyResponse:
- *        type: object
- *        properties:
- *          claims: 
- *            type: object
- *          result:
- *           allOf:
- *              - $ref: '#/components/schemas/VerifyResult' 
+ *       type: object
+ *       properties:
+ *         claims:
+ *           type: object
+ *         result:
+ *           $ref: '#/components/schemas/VerifyResult'
  */
-
-
-async function fetchDIDDocument(did) {
-  try {
-    const response = await axios.get(process.env.DID_RESOLVER+"/1.0/identifiers/"+did);
-    
-     if (response.data && response.data.didDocument) {
-      return response.data.didDocument;
-    } else {
-      return response.data
-    }
-  } catch (error) {
-    console.error('Error during did doc retrieval', error);
-    throw error;
-  }
-}
-
-const createVerifier = () => {
-  const verifier = async (data, sig) => {
-    try {
-      console.debug("Data:" + data + " Sig:" + sig);
-
-      const parts = data.split('.');
-      const decodedParts = parts.map(part =>
-        Buffer.from(part, 'base64url').toString('utf-8')
-      );
-
-      if (!decodedParts || decodedParts.length < 2) {
-        throw new Error("token not parseable");
-      }
-
-      const header = JSON.parse(decodedParts[0]);
-      const body = JSON.parse(decodedParts[1]);
-
-      if (!header) {
-        throw new Error("header not parseable: " + decodedParts[0]);
-      }
-
-      let jwk = null;
-
-      // JWK direkt im Header hat Vorrang
-      if (header.jwk) {
-        jwk = header.jwk;
-      } else if (header.kid) {
-        let did;
-        let keyId;
-
-        if (header.kid.startsWith('did:')) {
-          /*
-           * Beispiel:
-           * kid = did:example:123#key-1
-           *
-           * DID-Dokument:
-           * did:example:123
-           *
-           * Gesuchter Key:
-           * did:example:123#key-1
-           */
-          const hashIndex = header.kid.indexOf('#');
-
-          did = hashIndex >= 0
-            ? header.kid.substring(0, hashIndex)
-            : header.kid;
-
-          keyId = header.kid;
-
-        } else if (header.kid.startsWith('#')) {
-          /*
-           * Beispiel:
-           * kid = #key-1
-           * iss = did:example:123
-           *
-           * DID-Dokument:
-           * did:example:123
-           *
-           * Gesuchter Key:
-           * did:example:123#key-1
-           */
-          if (!body.iss || typeof body.iss !== 'string') {
-            throw new Error(
-              "kid starts with # but iss claim is missing"
-            );
-          }
-
-          if (!body.iss.startsWith('did:')) {
-            throw new Error(
-              "kid starts with # but iss is not a DID: " + body.iss
-            );
-          }
-
-          did = body.iss;
-          keyId = body.iss + header.kid;
-
-        } else {
-          throw new Error(
-            "unsupported kid format: " + header.kid
-          );
-        }
-
-        const resolverResult = await fetchDIDDocument(did);
-
-        if (
-          !resolverResult ||
-          !Array.isArray(resolverResult.verificationMethod)
-        ) {
-          throw new Error(
-            "DID document contains no verificationMethod"
-          );
-        }
-
-        // Unterstützt sowohl absolute IDs:
-        // did:example:123#key-1
-        //
-        // als auch relative IDs:
-        // #key-1
-        const fragmentIndex = keyId.indexOf('#');
-        const fragment =
-          fragmentIndex >= 0
-            ? keyId.substring(fragmentIndex)
-            : null;
-
-        const key = resolverResult.verificationMethod.find(method =>
-          method.id === keyId ||
-          (fragment && method.id === fragment)
-        );
-
-        if (!key) {
-          throw new Error(
-            "verification key not found in DID document: " + keyId
-          );
-        }
-
-        if (!key.publicKeyJwk) {
-          throw new Error(
-            "verification method has no publicKeyJwk: " + key.id
-          );
-        }
-
-        jwk = key.publicKeyJwk;
-      }
-
-      if (jwk == null) {
-        throw new Error("no public key for verification found");
-      }
-
-      console.debug("Verification JWK:", jwk);
-
-      return crypto.verify(
-        null,
-        Buffer.from(data),
-        {
-          key: jwk,
-          format: 'jwk',
-          dsaEncoding: 'ieee-p1363'
-        },
-        Buffer.from(sig, 'base64url')
-      );
-
-    } catch (error) {
-      console.error("Verification failed:", error);
-      return false;
-    }
-  };
-
-  return { verifier };
-};
-
-const signerFunc = async (keyMetadata,data) => {
-  return await axios.post(process.env.SIGNER_SIGN_URL,{
-     "namespace": keyMetadata.namespace,
-     "group": keyMetadata.group,
-     "key": keyMetadata.key,
-     "data": Buffer.from(data).toString("base64")
-   },
-   {
-   headers: {
-       'Content-Type': 'application/json'
-   }}).then(response => {
-
-     const buffer = Buffer.from(response.data.signature, 'base64');
-     console.debug("Data:"+data+" Sig:" + Buffer.from(buffer).toString('base64url'))
-     return Buffer.from(buffer).toString('base64url')
-   })
-   .catch(error => {
-       console.error('Error:', error.response ? error.response.data : error.message);
-   });
- };
-
 
 /**
  * @swagger
@@ -410,88 +242,38 @@ const signerFunc = async (keyMetadata,data) => {
  *             $ref: '#/components/schemas/IssueBody'
  *     responses:
  *       400:
+ *         description: Invalid request
  *         content:
- *            application/json:
- *              schema: 
- *                 $ref: '#/components/schemas/Error'
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  *       200:
- *         description: A JSON object containing a the issue response
+ *         description: Successful response
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/IssueResponse'
  */
 app.post('/issue', async (req, res) => {
-  const { issuer, subject,vct, holder,disclosureFrame } = req.body;
   try {
-      if (!vct || typeof vct !== 'string') {
-        throw new Error("Missing required parameter 'vct'")
-      }
-
-      if (!issuer|| !issuer.signer.alg || !issuer.signer.kid|| !issuer.signer.namespace || !issuer.signer.key ) {
-        throw new Error("Issuer metadata are missing (Alg,Kid,namespace,key,group)")
-      }
-
-      if (!holder) {
-        throw new Error("issuer metadata are missing ()")
-      }
-
-      if (issuer.kid) {
-
-        const didDoc = await fetchDIDDocument(issuer.signer.kid)
-
-        if (!didDoc) {
-          throw new Error("The provided kid is not valid.")
-        }
-      }
-
-      const header = {
-        alg: issuer.signer.alg,
-        typ: 'dc+sd-jwt',
-        kid: issuer.signer.kid,
-      }
-
-      const signer = async(data) => {
-        return await signerFunc(issuer.signer,data)
-      }
-
-      const sdjwt = new SDJwtVcInstance({
-        signer,
-        signAlg: issuer.signer.alg,
-        hasher: digest,
-        hashAlg: 'sha-256',
-        saltGenerator: generateSalt,
-      });
-
-      var claims = {
-        ...subject.claims,
-        iss: subject.iss,
-        iat: Math.floor(Date.now() / 1000),
-        vct:vct,
-        exp: subject.exp
-      }
-
-      if (holder.cnf) {
-          claims = {
-            ...subject.claims,
-            cnf: holder.cnf,
-            iss: subject.iss,
-            iat:subject.iat,
-            vct:vct,
-            exp: subject.exp
-          }
-      }
-
-      const encodedSdjwt = await sdjwt.issue(
-        claims,
-        disclosureFrame,
-        {header}
-      );
-
-    res.json({ sdjwt: encodedSdjwt });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+    const { issuer, subject, vct, holder, disclosureFrame } = req.body;
+    if (typeof vct !== 'string' || !vct) throw new Error('Missing vct');
+    if (!issuer?.signer?.alg || !issuer.signer.kid || !issuer.signer.namespace || !issuer.signer.key) {
+      throw new Error('Issuer signer metadata missing');
+    }
+    if (!holder || !subject?.claims || !subject.iss) throw new Error('Holder or subject missing');
+    const header = { alg: issuer.signer.alg, typ: 'dc+sd-jwt', kid: issuer.signer.kid };
+    const claims = {
+      ...subject.claims, ...(holder.cnf ? { cnf: holder.cnf } : {}),
+      iss: subject.iss, iat: subject.iat ?? Math.floor(Date.now() / 1000),
+      vct, exp: subject.exp
+    };
+    const instance = new SDJwtVcInstance({
+      signer: data => signerFunc(issuer.signer, data), signAlg: issuer.signer.alg,
+      hasher: digest, hashAlg: 'sha-256', saltGenerator: generateSalt
+    });
+    res.json({ sdjwt: await instance.issue(claims, disclosureFrame, { header }) });
+  } catch (error) { res.status(400).json({ error: error.message }); }
 });
 
 /**
@@ -507,138 +289,65 @@ app.post('/issue', async (req, res) => {
  *             $ref: '#/components/schemas/VerifyBody'
  *     responses:
  *       400:
+ *         description: Invalid request
  *         content:
- *            application/json:
- *              schema: 
- *                 $ref: '#/components/schemas/Error'
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  *       200:
- *         description: A JSON object containing a the verify response
+ *         description: Successful response
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/VerifyResponse'
  */
 app.post('/verify', async (req, res) => {
-  const { sdjwt,disclosureFrame,verifyKeyBinding, nonce, aud } = req.body;
-  const { verifier } = createVerifier()
-
-  var result = {
-    isValid: false,
-    isValidJwtPayload: false,
-    isSignatureValid: false,
-    isStatusValid: false,
-    // isNotBeforeValid: false,
-    //isExpiryTimeValid: false,
-    areRequiredClaimsIncluded: false,
-    isKeyBindingValid: false,
-    containsExpectedKeyBinding: false,
-    //containsRequiredVcProperties: false,
-  }
-
-
-  const kbVerifier = async (data,sig) => {
-    const parts = sdjwt.split('.');
-    const decodedParts = parts.map(part => Buffer.from(part,'base64url').toString('utf-8'));
-
-    if (decodedParts != null) {
-      const body = JSON.parse(decodedParts[1])
-      if (body.cnf) {  
-        var jwk = {}
-
-        if (!body.cnf.jwk) {
-          throw "No JWK in body cnf available"
-        }
-
-        if (typeof body.cnf.jwk !== 'object') {
-          jwk = JSON.parse(body.cnf.jwk)
-        } else {
-          jwk = body.cnf.jwk
-        }
-        
-        return crypto.verify(null, Buffer.from(data), {
-          key: jwk,
-          format: 'jwk',
-          dsaEncoding:'ieee-p1363'
-        }, Buffer.from(sig, 'base64url'));
-      }
-    }
-  }
-
-
-  const sdjwtInstance = new SDJwtVcInstance({
-    verifier,
-    hasher: digest,
-    hashAlg: 'sha-256',
-    saltGenerator: generateSalt,
-    kbVerifier: kbVerifier,
-    statusListFetcher: async (uri) => {
-    const response = await axios.get(uri, {
-      headers: {
-        Accept: 'application/statuslist+jwt'
-        }
-      });
-
-      return response.data;
-    },
-  });
-
-  const requiredKeys = disclosureFrame ? [...disclosureFrame, 'vct'] : ['vct']
-
-
+  const { sdjwt, disclosureFrame, verifyKeyBinding = false, nonce, aud } = req.body;
   try {
-      const decodedSdJwt = await decodeSdJwt(sdjwt, digest);
-      console.debug('The decoded Disclosures are:');
-      console.debug(JSON.stringify(decodedSdJwt.disclosures, null, 2));
-
-      const claims = await getClaims(
-        decodedSdJwt.jwt.payload,
-        decodedSdJwt.disclosures,
-        digest,
-      );
-
-      console.debug('The claims are:');
-      console.debug(JSON.stringify(claims, null, 2));
-
-      const token = await sdjwtInstance.verify(sdjwt,requiredKeys,verifyKeyBinding !== undefined?verifyKeyBinding:false);
-
-      if (verifyKeyBinding == undefined) {
-        result.isKeyBindingValid = true
-        result.containsExpectedKeyBinding = true
-      }
-      result.isSignatureValid = true
-      result.isValid = true
-      result.isStatusValid = true
-      result.areRequiredClaimsIncluded = true
- 
-      if (token.payload) {
-        result.isValidJwtPayload = true
-      }
-
-      if (token.kb) {
-        result.isKeyBindingValid = true
-
-        if (token.kb.payload.nonce != nonce) {
-          throw new Error("Nonce not valid")
-        }
-
-        if (token.kb.payload.aud != aud) {
-          throw new Error("Audience not valid")
-        }
-
-        result.containsExpectedKeyBinding = true
-      }
-
-    res.json({"result":result,"claims":claims});
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
+    if (typeof sdjwt !== 'string' || !sdjwt) throw new Error('sdjwt required');
+    if (verifyKeyBinding && (!nonce || !aud)) throw new Error('nonce and aud required');
+    const issuerJwt = sdjwt.split('~')[0];
+    const issuerParts = issuerJwt.split('.');
+    if (issuerParts.length !== 3) throw new Error('Invalid issuer JWT');
+    const issuerPayload = JSON.parse(Buffer.from(issuerParts[1], 'base64url').toString('utf8'));
+    const kbVerifier = async (data, sig) => {
+      const jwk = issuerPayload.cnf?.jwk;
+      if (!jwk) throw new Error('No cnf.jwk in issuer JWT');
+      return crypto.verify(null, Buffer.from(data), {
+        key: typeof jwk === 'string' ? JSON.parse(jwk) : jwk,
+        format: 'jwk', dsaEncoding: 'ieee-p1363'
+      }, Buffer.from(sig, 'base64url'));
+    };
+    const instance = new SDJwtVcInstance({
+      ...createVerifier(), hasher: digest, hashAlg: 'sha-256',
+      saltGenerator: generateSalt, kbVerifier,
+      statusListFetcher: async uri => (await axios.get(uri, {
+        headers: { Accept: 'application/statuslist+jwt' }
+      })).data
+    });
+    const decoded = await decodeSdJwt(sdjwt, digest);
+    const claims = await getClaims(decoded.jwt.payload, decoded.disclosures, digest);
+    const requiredKeys = Array.isArray(disclosureFrame) ? [...disclosureFrame, 'vct'] : ['vct'];
+    const token = await instance.verify(sdjwt, requiredKeys, verifyKeyBinding);
+    if (verifyKeyBinding) {
+      if (!token.kb) throw new Error('Key binding missing');
+      if (token.kb.payload.nonce !== nonce) throw new Error('Nonce not valid');
+      if (token.kb.payload.aud !== aud) throw new Error('Audience not valid');
+    }
+    res.json({ claims, result: {
+      isValid: true, isValidJwtPayload: !!token.payload, isSignatureValid: true,
+      isStatusValid: true, areRequiredClaimsIncluded: true,
+      isKeyBindingValid: !verifyKeyBinding || !!token.kb,
+      containsExpectedKeyBinding: !verifyKeyBinding || !!token.kb
+    }});
+  } catch (error) { console.error('Verification failed:', error); res.status(400).json({ error: error.message }); }
 });
 
 /**
  * @swagger
  * /present:
  *   post:
- *     summary: Returns the token for presentation and with disclosure
+ *     summary: Returns the token for presentation with disclosure
  *     requestBody:
  *       required: true
  *       content:
@@ -647,55 +356,44 @@ app.post('/verify', async (req, res) => {
  *             $ref: '#/components/schemas/PresentationBody'
  *     responses:
  *       400:
+ *         description: Invalid request
  *         content:
- *            application/json:
- *              schema: 
- *                 $ref: '#/components/schemas/Error'
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  *       200:
- *         description: A JSON object containing a the issue response
+ *         description: Successful response
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/IssueResponse'
  */
-app.post("/present",async(req,res) => {
-  const { sdjwt,disclosureFrame,holder, nonce,aud} = req.body;
-
+app.post('/present', async (req, res) => {
   try {
-        const kbsigner  = async(data) => {
-          return await signerFunc(holder.signer,data)
-        }
-
-        const sdjwtInstance = new SDJwtVcInstance({
-          kbSigner: kbsigner,
-          kbSignAlg: holder.signer.alg,
-          hasher: digest,
-          hashAlg: 'sha-256',
-          saltGenerator: generateSalt
-        });
-      
-        var presentationFrame = disclosureFrame
-        if (!presentationFrame){
-          const decodedSdJwt = await decodeSdJwt(sdjwt, digest);
-          presentationFrame=[]
-          decodedSdJwt.disclosures.forEach(function(value){
-            presentationFrame[value.key] = false
-          });
-
-        }
-
-        const compactDerivedSdJwtVc = await sdjwtInstance.present(sdjwt, presentationFrame,{
-          kb:{payload: {
-            iat: Math.floor(Date.now() / 1000),
-            nonce:nonce,
-            aud: aud
-          }}
-        })
-
-        res.json({sdjwt:compactDerivedSdJwtVc});
-}  catch (error) {
-  res.status(400).json({ error: error.message });
-}
+    const { sdjwt, holder, nonce, aud } = req.body;
+    if (typeof sdjwt !== 'string' || !sdjwt) throw new Error('sdjwt required');
+    if (!holder?.signer?.alg || !holder.signer.namespace || !holder.signer.key) throw new Error('holder.signer missing');
+    if (!nonce || !aud) throw new Error('nonce and aud required');
+    // Go sends presentationFrame; disclosureFrame remains supported for old callers.
+    const frame = normalizePresentationFrame(req.body.presentationFrame ?? req.body.disclosureFrame);
+    const instance = new SDJwtVcInstance({
+      kbSigner: data => signerFunc(holder.signer, data),
+      kbSignAlg: holder.signer.alg, hasher: digest,
+      hashAlg: 'sha-256', saltGenerator: generateSalt
+    });
+    const presented = await instance.present(sdjwt, frame, {
+      kb: { payload: { iat: Math.floor(Date.now() / 1000), nonce, aud } }
+    });
+    const disclosureCount = Math.max(0, presented.split('~').length - 2);
+    console.info('SD-JWT presentation', { requestedClaims: Object.keys(frame), disclosureCount });
+    if (Object.keys(frame).length && disclosureCount === 0) {
+      throw new Error('No disclosures included despite non-empty presentationFrame');
+    }
+    res.json({ sdjwt: presented });
+  } catch (error) {
+    console.error('Presentation failed:', error);
+    res.status(400).json({ error: error.message });
+  }
 });
 
 /**
@@ -705,13 +403,7 @@ app.post("/present",async(req,res) => {
  *     summary: Returns the is alive response
  *     responses:
  *       200:
- *         description: a 200 of service availability
+ *         description: Service is alive
  */
-app.get('/isAlive', async (req, res) =>{
-  res.status(200).send()
-})
-
-
-app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
-});
+app.get('/isAlive', (_req, res) => res.sendStatus(200));
+app.listen(Number(process.env.PORT || 8080), () => console.info('SD-JWT service listening'));
